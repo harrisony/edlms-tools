@@ -116,6 +116,7 @@ def courses(args):
     for course in ed.courses:
         print("{id:<3}  {code:4} {title:} ({year:}-{session:})".format(**course))
 
+
 def main_resources(args):
     ed = EdlmsUser(**vars(args))
     if args.list is not None:
@@ -145,7 +146,7 @@ def assignments(args):
             for case in submission['result']['testcases']:
                 if case['passed'] != True:
                     print("----------------------------------")
-                    print("{name:} -- {feedback:}\n{command:}\nInput\n: {input}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}".format(**case))
+                    print("{name:} -- {feedback:}\n{command:}\nInput\n: {input}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}\n\n{memcheck:}".format(**case))
                     print("----------------------------------")
 
 
