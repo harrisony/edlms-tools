@@ -88,6 +88,24 @@ class EdlmsUser:
                     f.flush()
             return filename
 
+    def assignments(self, for_course):
+        r = self._session.get('https://edlms.com/api/courses/{}/assignments'.format(for_course), verify=False)
+        if r.status_code != 200:
+            raise EdlmsException(r.text)
+        return r.json()['assignments']
+    
+    def challenge(self, cid):
+        r = self._session.get('https://edlms.com/api/challenges/{}'.format(cid), verify=False)
+        if r.status_code != 200:
+            raise EdlmsException(r.text)
+        return r.json()['challenge']
+
+    def challenge_submissions(self, cid):
+        r = self._session.get('https://edlms.com/api/user/challenges/{}/submissions'.format(cid), verify=False)
+        if r.status_code != 200:
+            raise EdlmsException(r.text)
+        return r.json()['submissions']
+
 def shell(args):
     ed = EdlmsUser(**vars(args))
     code.interact(local=locals())
@@ -111,6 +129,26 @@ def main_resources(args):
             print("Saved as {}".format(ed.download_resource(resource)))
 
 
+def assignments(args):
+    ed = EdlmsUser(**vars(args))
+    if args.list is not None:
+        for i in ed.assignments(args.list):
+            print("{challenge_id:3}  {title:}".format(**i))
+    elif args.show is not None:
+        print("{title:}\n{body_raw:}".format(**ed.challenge(args.show)))
+    elif args.latest_submission is not None:
+        submission = ed.challenge_submissions(args.latest_submission)[0]
+ 
+        print("{created_at:}\t Passed: {result[passed]:}\t {result[feedback]:}".format(**submission))
+        if submission['result']['passed'] == False and submission['result']['testcases'] is not None:
+            print(submission['result'])
+            for case in submission['result']['testcases']:
+                if case['passed'] != True:
+                    print("----------------------------------")
+                    print("{name:} -- {feedback:}\n{command:}\nInput\n: {input}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}".format(**case))
+                    print("----------------------------------")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='edlms-downloader')
     parser.add_argument("-u", "--username", default=None)
@@ -130,9 +168,16 @@ if __name__ == '__main__':
     
     s_shell = subparsers.add_parser("resources", help="Get resources")
     s_group = s_shell.add_mutually_exclusive_group()
-    s_group.add_argument('-l', '--list', help="List resources")
-    s_group.add_argument('-d', '--download', nargs="+", help="download resource")
+    s_group.add_argument('-l', '--list', help="List resources for a course")
+    s_group.add_argument('-d', '--download', nargs="+", help="Download resource with id")
     s_shell.set_defaults(func=main_resources)
+    
+    a_shell = subparsers.add_parser("assignments", help="View assignments")
+    a_group = a_shell.add_mutually_exclusive_group()
+    a_group.add_argument('-l', '--list', help="List assignments for a course")
+    a_group.add_argument('--show', help="Show assignment with id")
+    a_group.add_argument('--latest-submission', help="Show details of latest submission")
+    a_shell.set_defaults(func=assignments)
 
     args = parser.parse_args()
 
