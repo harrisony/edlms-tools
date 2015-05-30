@@ -7,6 +7,7 @@ import logging
 import ssl
 import code
 import getpass
+import cgi
 
 import requests_cache
 requests_cache.install_cache('dev_cache')
@@ -44,13 +45,40 @@ class EdlmsUser:
     def login(self, login, password):
         credentials = {'login': login, 'password': password}
         r = self._session.post('https://edlms.com/api/token', data=json.dumps(credentials), verify=False)
-        if r.status_code == 200:
-            self._session.headers['X-Token'] = r.json()['token']
-            r = self._session.get('https://edlms.com/api/user', verify=False)
-            self.user = r.json()['user']
-            self.courses = r.json()['courses']
-        else:
+        if r.status_code != 200:
             raise EdlmsException(r.text)
+        self._session.headers['X-Token'] = r.json()['token']
+        r = self._session.get('https://edlms.com/api/user', verify=False)
+        self.user = r.json()['user']
+        self.courses = r.json()['courses']
+
+    def resources(self, for_course=None):
+        _resources = list()
+        if for_course is None:
+            for_course = [item['id'] for item in self.courses]
+    
+        for course in for_course:
+            r = self._session.get('https://edlms.com/api/courses/{}/resources'.format(course), verify=False)
+            if r.status_code == 200:
+                _resources.extend(r.json()['resources'])
+            else:
+                raise EdlmsException(r.text)
+        return _resources
+
+    def download_resource(self, rid, filename=None):
+        r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True, verify=False)
+        if r.status_code != 200:
+            raise EdlmsException(r.text)
+        resource = next((item for item in self.resources() if item['id'] == rid))
+        if filename is None:
+            filename = cgi.parse_header(r.headers['Content-Disposition'])[1]['filename']
+
+        with open(filename, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024):
+                if chunk:
+                    f.write(chunk)
+                    f.flush()
+            return filename
 
 def shell(args):
     ed = EdlmsUser(**vars(args))
@@ -82,7 +110,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.username is None and args.password is None:
+    if args.username is None and args.password is None and args.token is None:
         args.username = input("Username: ")
         args.password = getpass.getpass("Password: ")
     elif args.username and args.password is None:
