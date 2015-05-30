@@ -7,10 +7,16 @@ import logging
 import ssl
 import code
 import getpass
-import cgi
+import re
+import itertools
+import operator
 
 import requests_cache
 requests_cache.install_cache('dev_cache')
+
+#props to http://stackoverflow.com/a/16090640
+def natural_sort_key(s, _nsre=re.compile('([0-9]+)')):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(_nsre, s)]
 
 class TlsAdapter(requests.adapters.HTTPAdapter):
     """"Transport adapter" that only connects over TLS."""
@@ -69,9 +75,11 @@ class EdlmsUser:
         r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True, verify=False)
         if r.status_code != 200:
             raise EdlmsException(r.text)
-        resource = next((item for item in self.resources() if item['id'] == rid))
+        resources = self.resources()
+        resource = next((item for item in resources if str(item['id']) == str(rid)))
+        print("{session:} {category:}  {name:}".format(**resource))
         if filename is None:
-            filename = cgi.parse_header(r.headers['Content-Disposition'])[1]['filename']
+            filename = re.search(r'filename="(.*)";', r.headers['Content-Disposition']).group(1)
 
         with open(filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
@@ -88,7 +96,19 @@ def courses(args):
     ed = EdlmsUser(**vars(args))
     sorted(ed.courses, key=lambda x: (x['year'], x['session'], x['code']), reverse=True)
     for course in ed.courses:
-        print("{:<3}  {:4} {} ({}-{})".format(course['id'], course['code'], course['title'], course['year'], course['session']))
+        print("{id:<3}  {code:4} {title:} ({year:}-{session:})".format(**course))
+
+def main_resources(args):
+    ed = EdlmsUser(**vars(args))
+    if args.list is not None:
+        sg = sorted(ed.resources(args.list), key=lambda x: natural_sort_key(x['session'] or ""))
+        for group, value in itertools.groupby(sg, operator.itemgetter('session')):
+            print(group)
+            for svs in value:
+                print("\t{id:<4} {category:}  {name:}".format(**svs))
+    elif args.download is not None:
+        for resource in args.download:
+            print("Saved as {}".format(ed.download_resource(resource)))
 
 
 if __name__ == '__main__':
@@ -107,6 +127,12 @@ if __name__ == '__main__':
 
     p_shell = subparsers.add_parser("shell", help="Drop to a shell")
     p_shell.set_defaults(func=shell)
+    
+    s_shell = subparsers.add_parser("resources", help="Get resources")
+    s_group = s_shell.add_mutually_exclusive_group()
+    s_group.add_argument('-l', '--list', help="List resources")
+    s_group.add_argument('-d', '--download', nargs="+", help="download resource")
+    s_shell.set_defaults(func=main_resources)
 
     args = parser.parse_args()
 
