@@ -136,7 +136,10 @@ def assignments(args):
         for i in ed.assignments(args.list):
             print("{challenge_id:3}  {title:}".format(**i))
     elif args.show is not None:
-        print("{title:}\n{body_raw:}".format(**ed.challenge(args.show)))
+        challenge = ed.challenge(args.show)
+        print("{title:}\n{body_raw:}\n\n".format(**challenge))
+        print("Files: {}".format(", ".join([x['name'] for x in challenge['scaffold']['files']])))
+        print("Scripts:\n" + "\n".join(["{} \t {}".format(k, "&& ".join(v)) for k, v in challenge['scripts'].items()]))
     elif args.latest_submission is not None:
         submission = ed.challenge_submissions(args.latest_submission)[0]
  
