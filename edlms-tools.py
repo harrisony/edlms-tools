@@ -10,13 +10,26 @@ import getpass
 import re
 import itertools
 import operator
+import os
+import time
 
-import requests_cache
-requests_cache.install_cache('dev_cache')
 
 #props to http://stackoverflow.com/a/16090640
 def natural_sort_key(s, _nsre=re.compile('([0-9]+)')):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(_nsre, s)]
+# props to https://gist.github.com/brantfaircloth/1443543
+class FullPaths(argparse.Action):
+    """Expand user- and relative-paths"""
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, os.path.abspath(os.path.expanduser(values)))
+
+def is_dir(dirname):
+    """Checks if a path is an actual directory"""
+    if not os.path.isdir(dirname):
+        msg = "{0} is not a directory".format(dirname)
+        raise argparse.ArgumentTypeError(msg)
+    else:
+        return dirname
 
 class TlsAdapter(requests.adapters.HTTPAdapter):
     """"Transport adapter" that only connects over TLS."""
@@ -41,7 +54,7 @@ class EdlmsUser:
 
     def login_from_token(self, token):
         self._session.headers['X-Token'] = token
-        r = self._session.get('https://edlms.com/api/user', verify=False)
+        r = self._session.get('https://edlms.com/api/user')
         if r.status_code == 200:
             self.user = r.json()['user']
             self.courses = r.json()['courses']
@@ -50,11 +63,11 @@ class EdlmsUser:
 
     def login(self, login, password):
         credentials = {'login': login, 'password': password}
-        r = self._session.post('https://edlms.com/api/token', data=json.dumps(credentials), verify=False)
+        r = self._session.post('https://edlms.com/api/token', data=json.dumps(credentials))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         self._session.headers['X-Token'] = r.json()['token']
-        r = self._session.get('https://edlms.com/api/user', verify=False)
+        r = self._session.get('https://edlms.com/api/user')
         self.user = r.json()['user']
         self.courses = r.json()['courses']
 
@@ -64,7 +77,7 @@ class EdlmsUser:
             for_course = [item['id'] for item in self.courses]
     
         for course in for_course:
-            r = self._session.get('https://edlms.com/api/courses/{}/resources'.format(course), verify=False)
+            r = self._session.get('https://edlms.com/api/courses/{}/resources'.format(course))
             if r.status_code == 200:
                 _resources.extend(r.json()['resources'])
             else:
@@ -72,7 +85,7 @@ class EdlmsUser:
         return _resources
 
     def download_resource(self, rid, filename=None):
-        r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True, verify=False)
+        r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True)
         if r.status_code != 200:
             raise EdlmsException(r.text)
         resources = self.resources()
@@ -89,22 +102,29 @@ class EdlmsUser:
             return filename
 
     def assignments(self, for_course):
-        r = self._session.get('https://edlms.com/api/courses/{}/assignments'.format(for_course), verify=False)
+        r = self._session.get('https://edlms.com/api/courses/{}/assignments'.format(for_course))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['assignments']
     
     def challenge(self, cid):
-        r = self._session.get('https://edlms.com/api/challenges/{}'.format(cid), verify=False)
+        r = self._session.get('https://edlms.com/api/challenges/{}'.format(cid))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['challenge']
 
     def challenge_submissions(self, cid):
-        r = self._session.get('https://edlms.com/api/user/challenges/{}/submissions'.format(cid), verify=False)
+        r = self._session.get('https://edlms.com/api/user/challenges/{}/submissions'.format(cid))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['submissions']
+    
+    def challenge_submit(self, cid, files):
+        submission = {'submission': {'files': files} }
+        r = self._session.post('https://edlms.com/api/challenges/{}/mark'.format(cid), data=json.dumps(submission))
+        if r.status_code != 201:
+            raise EdlmsException(r.text)
+        return r.json()['submission']
 
 def shell(args):
     ed = EdlmsUser(**vars(args))
@@ -143,15 +163,33 @@ def assignments(args):
     elif args.latest_submission is not None:
         submission = ed.challenge_submissions(args.latest_submission)[0]
  
-        print("{created_at:}\t Passed: {result[passed]:}\t {result[feedback]:}".format(**submission))
+        print("Submission {id:} {created_at:}\t Passed: {result[passed]:} {result[feedback]:}".format(**submission))
+        print("Build Output: \n", submission['result']['build_output'])
         if submission['result']['passed'] == False and submission['result']['testcases'] is not None:
-            print(submission['result'])
             for case in submission['result']['testcases']:
                 if case['passed'] != True:
                     print("----------------------------------")
-                    print("{name:} -- {feedback:}\n{command:}\nInput\n: {input}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}\n\n{memcheck:}".format(**case))
+                    print("{name:} -- {feedback:}\n{command:}\nInput:\n{input:}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}\n\n{memcheck:}".format(**case))
                     print("----------------------------------")
 
+    elif args.submit is not None:
+        smission_files = list()
+
+        for name in [i['name'] for i in ed.challenge(args.submit)['scaffold']['files']]:
+            with open(os.path.join(args.path, name), 'r') as f:
+                smission_files.append({'name': name, 'content': f.read()})
+        submitted = ed.challenge_submit(args.submit, smission_files)
+        print("Submitted: {id:}".format(**submitted))
+
+        time.sleep(2)
+        result = next((item for item in ed.challenge_submissions(args.submit) if str(item['id']) == str(submitted['id'])))
+        while result['status'] != 'completed':
+            print(result['status'])
+            time.sleep(5)
+            result = next((item for item in ed.challenge_submissions(args.submit) if str(item['id']) == str(submitted['id'])))
+
+        args.latest_submission = args.submit
+        assignments(args)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='edlms-downloader')
@@ -181,6 +219,10 @@ if __name__ == '__main__':
     a_group.add_argument('-l', '--list', help="List assignments for a course")
     a_group.add_argument('--show', help="Show assignment with id")
     a_group.add_argument('--latest-submission', help="Show details of latest submission")
+    sub_group = a_group.add_argument_group()
+    sub_group.add_argument('--submit', help="Are you crazy? Assignment to submit")
+    sub_group.add_argument('--path',  action=FullPaths, type=is_dir, default=os.getcwd())
+    
     a_shell.set_defaults(func=assignments)
 
     args = parser.parse_args()
