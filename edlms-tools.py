@@ -126,9 +126,16 @@ class EdlmsUser:
             raise EdlmsException(r.text)
         return r.json()['submission']
 
+    def token(self):
+        return self._session.headers['X-Token']
+
 def shell(args):
     ed = EdlmsUser(**vars(args))
     code.interact(local=locals())
+
+def token(args):
+    ed = EdlmsUser(**vars(args))
+    print(ed.token())
 
 def courses(args):
     ed = EdlmsUser(**vars(args))
@@ -207,6 +214,9 @@ if __name__ == '__main__':
 
     p_shell = subparsers.add_parser("shell", help="Drop to a shell")
     p_shell.set_defaults(func=shell)
+
+    p_shell = subparsers.add_parser("token", help="Print token")
+    p_shell.set_defaults(func=token)
     
     s_shell = subparsers.add_parser("resources", help="Get resources")
     s_group = s_shell.add_mutually_exclusive_group()
