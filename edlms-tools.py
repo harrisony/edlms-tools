@@ -84,15 +84,15 @@ class EdlmsUser:
                 raise EdlmsException(r.text)
         return _resources
 
-    def download_resource(self, rid, filename=None):
+    def download_resource(self, rid, filename="{original_name:}"):
         r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True)
         if r.status_code != 200:
             raise EdlmsException(r.text)
         resources = self.resources()
         resource = next((item for item in resources if str(item['id']) == str(rid)))
         print("{session:} {category:}  {name:}".format(**resource))
-        if filename is None:
-            filename = re.search(r'filename="(.*)";', r.headers['Content-Disposition']).group(1)
+        resource['original_name'] = re.search(r'filename="(.*)";', r.headers['Content-Disposition']).group(1)
+        filename = filename.format(**resource)
 
         with open(filename, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024):
