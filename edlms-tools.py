@@ -62,6 +62,10 @@ class EdlmsUser(object):
         self.login_from_token(r.json()['token'])
 
     def resources(self, course_id=None):
+        if course_id is None:
+            l = [self.resources(i) for i in self.course_hash.keys()]
+            return [item for sublist in l for item in sublist]
+
         r = self.s.get(HOST + '/api/courses/{}/resources'.format(course_id))
         if r.status_code != 200:
             raise EdlmsException(r.text)
@@ -73,7 +77,7 @@ class EdlmsUser(object):
         return res
 
     def download_resource(self, rid, filename="{original_name:}"):
-        r = self.s.post(HOST + '/api/resources/{}/download'.format(rid), stream=True)
+        r = self.s.post(HOST + '/api/resources/{}/download'.format(rid), stream=True, data={'_token': self.s.headers['x-token']})
         if r.status_code != 200:
             raise EdlmsException(r.text)
         resources = self.resources()
