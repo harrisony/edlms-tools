@@ -13,6 +13,7 @@ import operator
 import os
 import time
 
+HOST = 'https://edstem.com.au'
 
 #props to http://stackoverflow.com/a/16090640
 def natural_sort_key(s, _nsre=re.compile('([0-9]+)')):
@@ -31,61 +32,48 @@ def is_dir(dirname):
     else:
         return dirname
 
-class TlsAdapter(requests.adapters.HTTPAdapter):
-    """"Transport adapter" that only connects over TLS."""
-
-    def init_poolmanager(self, connections, maxsize, block=False):
-        self.poolmanager = requests.packages.urllib3.poolmanager.PoolManager(num_pools=connections,
-                                       maxsize=maxsize,
-                                       block=block,
-                                       ssl_version=ssl.PROTOCOL_TLSv1_2)
 class EdlmsException(Exception):
     pass
 
-class EdlmsUser:
+class EdlmsUser(object):
+    s = requests.Session()
+
     def __init__(self, **kwargs):
-        self._session = requests.Session()
-        self._session.mount('https://', TlsAdapter())
-        self._session.headers['content-type'] = 'application/json;charset=utf-8'
         if kwargs['token'] is not None:
             self.login_from_token(kwargs['token'])
         elif kwargs['username'] is not None and kwargs['password'] is not None:
             self.login(kwargs['username'], kwargs['password'])
 
     def login_from_token(self, token):
-        self._session.headers['X-Token'] = token
-        r = self._session.get('https://edlms.com/api/user')
+        self.s.headers.update({'x-token': token})
+        r = self.s.get(HOST + '/api/user')
         if r.status_code == 200:
             self.user = r.json()['user']
             self.courses = r.json()['courses']
+            self.course_hash = {str(x['id']) : x for x in self.courses}
         else:
             raise EdlmsException(r.text)
 
     def login(self, login, password):
         credentials = {'login': login, 'password': password}
-        r = self._session.post('https://edlms.com/api/token', data=json.dumps(credentials))
+        r = self.s.post(HOST + '/api/token', json=credentials)
         if r.status_code != 200:
             raise EdlmsException(r.text)
-        self._session.headers['X-Token'] = r.json()['token']
-        r = self._session.get('https://edlms.com/api/user')
-        self.user = r.json()['user']
-        self.courses = r.json()['courses']
+        self.login_from_token(r.json()['token'])
 
-    def resources(self, for_course=None):
-        _resources = list()
-        if for_course is None:
-            for_course = [item['id'] for item in self.courses]
-    
-        for course in for_course:
-            r = self._session.get('https://edlms.com/api/courses/{}/resources'.format(course))
-            if r.status_code == 200:
-                _resources.extend(r.json()['resources'])
-            else:
-                raise EdlmsException(r.text)
-        return _resources
+    def resources(self, course_id=None):
+        r = self.s.get(HOST + '/api/courses/{}/resources'.format(course_id))
+        if r.status_code != 200:
+            raise EdlmsException(r.text)
+        res = r.json()['resources']
+
+        # for x in res:
+        #     x['_date'] = max(x['created_at'], x['updated_at'])
+
+        return res
 
     def download_resource(self, rid, filename="{original_name:}"):
-        r = self._session.post('https://edlms.com/api/resources/{}/download'.format(rid), stream=True)
+        r = self.s.post(HOST + '/api/resources/{}/download'.format(rid), stream=True)
         if r.status_code != 200:
             raise EdlmsException(r.text)
         resources = self.resources()
@@ -101,33 +89,34 @@ class EdlmsUser:
                     f.flush()
             return filename
 
-    def assignments(self, for_course):
-        r = self._session.get('https://edlms.com/api/courses/{}/assignments'.format(for_course))
+    def assignments(self, course_id):
+        r = self.s.get(HOST + '/api/courses/{}/assignments'.format(course_id))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['assignments']
     
-    def challenge(self, cid):
-        r = self._session.get('https://edlms.com/api/challenges/{}'.format(cid))
+    def challenge(self, course_id):
+        r = self.s.get(HOST + '/api/challenges/{}'.format(course_id))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['challenge']
 
-    def challenge_submissions(self, cid):
-        r = self._session.get('https://edlms.com/api/user/challenges/{}/submissions'.format(cid))
+    def challenge_submissions(self, course_id):
+        r = self.s.get(HOST + '/api/user/challenges/{}/submissions'.format(course_id))
         if r.status_code != 200:
             raise EdlmsException(r.text)
         return r.json()['submissions']
     
-    def challenge_submit(self, cid, files):
+    def challenge_submit(self, course_id, files):
         submission = {'submission': {'files': files} }
-        r = self._session.post('https://edlms.com/api/challenges/{}/mark'.format(cid), data=json.dumps(submission))
+        r = self.s.post(HOST + '/api/challenges/{}/mark'.format(course_id), json=submission)
         if r.status_code != 201:
             raise EdlmsException(r.text)
         return r.json()['submission']
 
+    @property
     def token(self):
-        return self._session.headers['X-Token']
+        return self.s.headers['X-Token']
 
 def shell(args):
     ed = EdlmsUser(**vars(args))
@@ -141,21 +130,28 @@ def courses(args):
     ed = EdlmsUser(**vars(args))
     sorted(ed.courses, key=lambda x: (x['year'], x['session'], x['code']), reverse=True)
     for course in ed.courses:
-        print("{id:<3}  {code:4} {title:} ({year:}-{session:})".format(**course))
+        print("{id:<3}  {code:4} {name:} ({year:}-{session:})".format(**course))
 
 
 def main_resources(args):
     ed = EdlmsUser(**vars(args))
-    if args.list is not None:
-        sg = sorted(ed.resources(args.list), key=lambda x: natural_sort_key(x['session'] or ""))
-        for group, value in itertools.groupby(sg, operator.itemgetter('session')):
-            print(group)
-            for svs in value:
-                print("\t{id:<4} {category:}  {name:}".format(**svs))
-    elif args.download is not None:
+
+    if args.download:
         for resource in args.download:
             print("Saved as {}".format(ed.download_resource(resource)))
+        return
 
+    if len(args.list) == 0 :
+        args.list = [str(x['id']) for x in ed.courses]
+    print(args.list)
+
+    for c in args.list:
+        print(ed.course_hash[c]['name'])
+        sg = ed.resources(c)
+
+        # seems like sessions arent used anymore
+        for r in sg:
+            print("\t{id:<4} {category:} ({session:}) {name:}".format(**r))
 
 def assignments(args):
     ed = EdlmsUser(**vars(args))
@@ -220,7 +216,7 @@ if __name__ == '__main__':
     
     s_shell = subparsers.add_parser("resources", help="Get resources")
     s_group = s_shell.add_mutually_exclusive_group()
-    s_group.add_argument('-l', '--list', help="List resources for a course")
+    s_group.add_argument('-l', '--list', help="List resources for a course", nargs='*')
     s_group.add_argument('-d', '--download', nargs="+", help="Download resource with id")
     s_shell.set_defaults(func=main_resources)
     
