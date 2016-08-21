@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 
 import requests
-import json
 import argparse
-import logging
-import ssl
 import code
 import getpass
 import re
@@ -60,6 +57,9 @@ class EdlmsUser(object):
         if r.status_code != 200:
             raise EdlmsException(r.text)
         self.login_from_token(r.json()['token'])
+
+    def courses_with_feature(self, feature):
+        return [i for i in self.courses if feature in i['features']]
 
     def resources(self, course_id=None):
         if course_id is None:
@@ -169,12 +169,12 @@ def assignments(args):
         print("Scripts:\n" + "\n".join(["{} \t {}".format(k, "&& ".join(v)) for k, v in challenge['scripts'].items()]))
     elif args.latest_submission is not None:
         submission = ed.challenge_submissions(args.latest_submission)[0]
- 
+
         print("Submission {id:} {created_at:}\t Passed: {result[passed]:} {result[feedback]:}".format(**submission))
         print("Build Output: \n", submission['result']['build_output'])
         if submission['result']['passed'] == False and submission['result']['testcases'] is not None:
             for case in submission['result']['testcases']:
-                if case['passed'] != True:
+                if not case['passed']:
                     print("----------------------------------")
                     print("{name:} -- {feedback:}\n{command:}\nInput:\n{input:}\n\nOutput:\n{observed:}\n\nExpected:\n{expected:}\n\n{memcheck:}".format(**case))
                     print("----------------------------------")
