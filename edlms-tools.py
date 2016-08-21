@@ -237,11 +237,15 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.username is None and args.password is None and args.token is None:
+    netrc = requests.utils.get_netrc_auth(HOST)
+
+    if args.username is None and args.password is None and args.token is None and netrc is None:
         args.username = input("Username: ")
         args.password = getpass.getpass("Password: ")
     elif args.username and args.password is None:
         args.password = getpass.getpass("Password: ")
+    elif netrc:
+        args.username, args.password = netrc
     elif args.username is None and args.password:
         parser.error("if you're going to give me a password, you'll need to give me a username")
 
