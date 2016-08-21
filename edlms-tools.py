@@ -128,7 +128,7 @@ def shell(args):
 
 def token(args):
     ed = EdlmsUser(**vars(args))
-    print(ed.token())
+    print(ed.token)
 
 def courses(args):
     ed = EdlmsUser(**vars(args))
