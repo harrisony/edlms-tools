@@ -6,6 +6,7 @@ import code
 import getpass
 import re
 import itertools
+import json
 import operator
 import os
 import time
@@ -103,7 +104,9 @@ class EdlmsUser(object):
         r = self.s.get(HOST + '/api/challenges/{}'.format(course_id))
         if r.status_code != 200:
             raise EdlmsException(r.text)
-        return r.json()['challenge']
+        cdata = r.json()['challenge']
+        cdata['content'] = json.loads(cdata['content'])
+        return cdata
 
     def challenge_submissions(self, course_id):
         r = self.s.get(HOST + '/api/user/challenges/{}/submissions'.format(course_id))
@@ -155,16 +158,16 @@ def main_resources(args):
 
         # seems like sessions arent used anymore
         for r in sg:
-            print("\t{id:<4} {category:} ({session:}) {name:}".format(**r))
+            print("\t{id:<4} {category:} ({session:}) {name:}\t [{created_at:} {updated_at:}]".format(**r))
 
 def assignments(args):
     ed = EdlmsUser(**vars(args))
     if args.list is not None:
         for i in ed.assignments(args.list):
-            print("{challenge_id:3}  {title:}".format(**i))
+            print("{id:3}  {title:}".format(**i))
     elif args.show is not None:
         challenge = ed.challenge(args.show)
-        print("{title:}\n{body_raw:}\n\n".format(**challenge))
+        print("{title:}\n{outline:}\n\n".format(**challenge))
         print("Files: {}".format(", ".join([x['name'] for x in challenge['scaffold']['files']])))
         print("Scripts:\n" + "\n".join(["{} \t {}".format(k, "&& ".join(v)) for k, v in challenge['scripts'].items()]))
     elif args.latest_submission is not None:
