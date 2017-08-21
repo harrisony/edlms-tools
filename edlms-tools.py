@@ -47,7 +47,7 @@ class EdlmsUser(object):
         r = self.s.get(HOST + '/api/user')
         if r.status_code == 200:
             self.user = r.json()['user']
-            self.courses = r.json()['courses']
+            self.courses = [x['course'] for x in r.json()['courses']]
             self.course_hash = {str(x['id']) : x for x in self.courses}
         else:
             raise EdlmsException(r.text)
@@ -125,6 +125,10 @@ class EdlmsUser(object):
     def token(self):
         return self.s.headers['X-Token']
 
+    @property
+    def current_semester(self):
+        return max([(x['year'], x['session']) for x in self.courses])
+
 def shell(args):
     ed = EdlmsUser(**vars(args))
     code.interact(local=locals())
@@ -135,9 +139,9 @@ def token(args):
 
 def courses(args):
     ed = EdlmsUser(**vars(args))
-    sorted(ed.courses, key=lambda x: (x['year'], x['session'], x['code']), reverse=True)
-    for course in ed.courses:
-        print("{id:<3}  {code:4} {name:} ({year:}-{session:})".format(**course))
+    clist = sorted(ed.courses, key=lambda x: (x['year'], x['session'], x['code']), reverse=True)
+    for course in clist:
+        print("{id:<4}  {code:<13} {name:} ({year:}-{session:})".format(**course))
 
 
 def main_resources(args):
@@ -150,15 +154,14 @@ def main_resources(args):
 
     if len(args.list) == 0 :
         args.list = [str(x['id']) for x in ed.courses]
-    print(args.list)
 
     for c in args.list:
-        print(ed.course_hash[c]['name'])
+        print("{name:} ({year:}-{session:})\t{id:}".format(**ed.course_hash[c]))
         sg = ed.resources(c)
 
         # seems like sessions arent used anymore
         for r in sg:
-            print("\t{id:<4} {category:} ({session:}) {name:}\t [{created_at:} {updated_at:}]".format(**r))
+            print("\t{id:<4} {category:} {name:}\t [{created_at:} {updated_at:}]".format(**r))
 
 def assignments(args):
     ed = EdlmsUser(**vars(args))
@@ -222,7 +225,7 @@ if __name__ == '__main__':
     p_shell.set_defaults(func=token)
     
     s_shell = subparsers.add_parser("resources", help="Get resources")
-    s_group = s_shell.add_mutually_exclusive_group()
+    s_group = s_shell.add_mutually_exclusive_group(required=True)
     s_group.add_argument('-l', '--list', help="List resources for a course", nargs='*')
     s_group.add_argument('-d', '--download', nargs="+", help="Download resource with id")
     s_shell.set_defaults(func=main_resources)
