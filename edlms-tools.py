@@ -154,10 +154,16 @@ def main_resources(args):
 
     if len(args.list) == 0 :
         args.list = [str(x['id']) for x in ed.courses]
+        args.list.sort()
 
     for c in args.list:
         print("{name:} ({year:}-{session:})\t{id:}".format(**ed.course_hash[c]))
         sg = ed.resources(c)
+
+
+        if args.sort_key:
+            sg = sorted(sg, key=lambda x: max((i for i in (x['created_at'], x['updated_at']) if i is not None)), reverse=True)
+
 
         # seems like sessions arent used anymore
         for r in sg:
@@ -225,6 +231,7 @@ if __name__ == '__main__':
     p_shell.set_defaults(func=token)
     
     s_shell = subparsers.add_parser("resources", help="Get resources")
+    s_shell.add_argument('-s', '--sort_key', default=None)
     s_group = s_shell.add_mutually_exclusive_group(required=True)
     s_group.add_argument('-l', '--list', help="List resources for a course", nargs='*')
     s_group.add_argument('-d', '--download', nargs="+", help="Download resource with id")
